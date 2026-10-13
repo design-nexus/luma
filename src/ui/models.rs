@@ -14,16 +14,28 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
         return;
     }
     let theme = app.theme.clone();
+    if area.width < 80 {
+        match app.models_pane {
+            ModelsPane::List => draw_installed(frame, app, &theme, area),
+            ModelsPane::Running => draw_running(frame, app, &theme, area),
+            ModelsPane::Pull => draw_pull(frame, app, &theme, area),
+        }
+        return;
+    }
+
     let [body, pull_area] =
         Layout::vertical([Constraint::Min(3), Constraint::Length(3)]).areas(area);
     let [installed, running] =
         Layout::horizontal([Constraint::Percentage(62), Constraint::Percentage(38)]).areas(body);
+    app.navigation.pane(installed, 0);
+    app.navigation.pane(pull_area, 2);
     draw_installed(frame, app, &theme, installed);
     draw_running(frame, app, &theme, running);
     draw_pull(frame, app, &theme, pull_area);
 }
 
 fn draw_installed(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+    app.navigation.pane(area, 0);
     let block = panel("Installed", app.models_pane == ModelsPane::List, theme);
     let items: Vec<ListItem> = if app.models.is_empty() {
         vec![ListItem::new(if app.connected == Some(false) {
@@ -62,10 +74,18 @@ fn draw_installed(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         area,
         &mut state,
     );
+    app.navigation.rows(
+        area.inner(ratatui::layout::Margin::new(1, 1)),
+        0,
+        state.offset(),
+        1,
+        app.models.len().saturating_sub(state.offset()),
+    );
 }
 
 fn draw_running(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
-    let block = panel("Running", false, theme);
+    app.navigation.details(area, 1);
+    let block = panel("Running", app.models_pane == ModelsPane::Running, theme);
     let inner = block.inner(area);
     frame.render_widget(block, area);
     let mut lines = Vec::new();
@@ -120,10 +140,14 @@ fn draw_running(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
             lines.push(Line::from(detail.quantization.clone()));
         }
     }
-    frame.render_widget(Paragraph::new(lines), inner);
+    frame.render_widget(
+        Paragraph::new(lines).scroll((app.navigation.scroll[1], 0)),
+        inner,
+    );
 }
 
 fn draw_pull(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+    app.navigation.pane(area, 2);
     let focused = app.models_pane == ModelsPane::Pull;
     let block = panel("Pull by name", focused, theme);
     let inner = block.inner(area);

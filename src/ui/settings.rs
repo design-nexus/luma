@@ -48,6 +48,14 @@ fn draw_settings(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         area,
         &mut state,
     );
+    app.navigation.pane(area, 0);
+    app.navigation.rows(
+        area.inner(ratatui::layout::Margin::new(1, 1)),
+        0,
+        state.offset(),
+        1,
+        Setting::ALL.len().saturating_sub(state.offset()),
+    );
 }
 
 fn draw_themes(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {

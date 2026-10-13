@@ -1,10 +1,12 @@
 mod app;
 #[cfg(test)]
 mod audit;
+mod aurora;
 mod commands;
 mod config;
 mod field;
 mod hf;
+mod navigation;
 mod ollama;
 mod slash;
 mod store;
@@ -15,9 +17,7 @@ mod util;
 use std::io::stdout;
 
 use anyhow::Context;
-use crossterm::event::{
-    DisableMouseCapture, EnableMouseCapture, Event, EventStream, MouseButton, MouseEventKind,
-};
+use crossterm::event::{DisableMouseCapture, EnableMouseCapture, Event, EventStream};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -42,7 +42,10 @@ impl Suspended {
 impl Drop for Suspended {
     fn drop(&mut self) {
         let _ = enable_raw_mode();
-        let _ = execute!(stdout(), EnterAlternateScreen, EnableMouseCapture);
+        let _ = execute!(stdout(), EnterAlternateScreen);
+        if !std::env::args().any(|a| a == "--no-mouse") {
+            let _ = execute!(stdout(), EnableMouseCapture);
+        }
     }
 }
 
@@ -62,7 +65,7 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
     if std::env::args().any(|a| a == "--help" || a == "-h") {
-        println!("Luma — Aurora terminal interface\n\nUsage: luma [--help] [--version]\nCtrl+K actions  ? help  Ctrl+C quit");
+        println!("Luma — Aurora terminal interface\n\nUsage: luma [--help] [--version] [--no-mouse]\nF2 Navigate  F6 panes  Ctrl+K actions  Ctrl+C quit");
         return Ok(());
     }
     let found = theme::find_omarchy();
@@ -85,14 +88,18 @@ async fn main() -> anyhow::Result<()> {
         let _ = execute!(stdout(), LeaveAlternateScreen, DisableMouseCapture);
         previous(info);
     }));
-    execute!(stdout(), EnterAlternateScreen, EnableMouseCapture)
-        .context("failed to enter the alternate screen")?;
+    execute!(stdout(), EnterAlternateScreen)?;
+    if !std::env::args().any(|a| a == "--no-mouse") {
+        execute!(stdout(), EnableMouseCapture)?;
+    }
+    execute!(stdout()).context("failed to enter the alternate screen")?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
     let mut reader = EventStream::new();
 
     let status = loop {
-        if let Err(err) = terminal.draw(|frame| ui::draw(frame, &mut app)) {
-            break Err(err).context("drawing the screen");
+        match terminal.draw(|frame| ui::draw(frame, &mut app)) {
+            Ok(rendered) => aurora::paint_wordmark(rendered.buffer)?,
+            Err(err) => break Err(err).context("drawing the screen"),
         }
         if let Some(action) = app.take_service_action() {
             let suspended = Suspended::enter();
@@ -115,18 +122,7 @@ async fn main() -> anyhow::Result<()> {
                         }
                     }
                     Some(Ok(Event::Paste(text))) => app.on_paste(&text),
-                    Some(Ok(Event::Mouse(mouse))) if !app.commands.open && !app.model_picker && !app.renaming && !app.editing_system && app.confirm.is_none() && !app.help => match mouse.kind {
-                        MouseEventKind::Down(MouseButton::Left) if app.start_clicked(mouse.column, mouse.row) => {
-                            app.begin_start();
-                        }
-                        MouseEventKind::ScrollUp if app.screen == crate::app::Screen::Chat => {
-                            app.scroll_lines(-3);
-                        }
-                        MouseEventKind::ScrollDown if app.screen == crate::app::Screen::Chat => {
-                            app.scroll_lines(3);
-                        }
-                        _ => {}
-                    },
+                    Some(Ok(Event::Mouse(mouse)))=>app.navigation_mouse(mouse),
                     Some(Ok(_)) => {}
                     Some(Err(err)) => break Err(err).context("reading terminal input"),
                     None => break Ok(()),

@@ -14,6 +14,15 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
         return;
     }
     let theme = app.theme.clone();
+    if area.width < 80 {
+        match app.hf_pane {
+            MarketPane::Search => draw_search(frame, app, &theme, area),
+            MarketPane::Results => draw_results(frame, app, &theme, area),
+            MarketPane::Files => draw_files(frame, app, &theme, area),
+        }
+        return;
+    }
+
     let [search_area, body] =
         Layout::vertical([Constraint::Length(3), Constraint::Min(1)]).areas(area);
     draw_search(frame, app, &theme, search_area);
@@ -29,6 +38,7 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_search(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+    app.navigation.pane(area, 0);
     let focused = app.hf_pane == MarketPane::Search;
     let title = format!("Search GGUF  ·  sort {}", app.hf_sort.label());
     let block = panel(&title, focused, theme);
@@ -52,6 +62,7 @@ fn draw_search(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
 }
 
 fn draw_results(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+    app.navigation.pane(area, 1);
     let focused = app.hf_pane == MarketPane::Results;
     let title = if app.hf_loading && app.hf_pane != MarketPane::Files {
         "Results  ·  loading"
@@ -92,52 +103,58 @@ fn draw_results(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         area,
         &mut state,
     );
+    app.navigation.rows(
+        area.inner(ratatui::layout::Margin::new(1, 1)),
+        1,
+        state.offset(),
+        1,
+        app.hf_results.len().saturating_sub(state.offset()),
+    );
 }
 
 fn draw_files(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
-    let block = panel("GGUF files", app.hf_pane == MarketPane::Files, theme);
+    app.navigation.pane(area, 2);
+    let block = panel(
+        "Files · (Enter) pull",
+        app.hf_pane == MarketPane::Files,
+        theme,
+    );
     let inner = block.inner(area);
     frame.render_widget(block, area);
-    let mut lines = vec![Line::from(Span::styled(
-        truncate(&app.hf_repo, inner.width as usize),
-        Style::default()
-            .fg(theme.accent)
-            .add_modifier(Modifier::BOLD),
-    ))];
-    lines.push(Line::from(Span::styled(
-        "Enter pulls through Ollama. Gated repos need HF_TOKEN on that service.",
-        Style::default().fg(theme.muted),
-    )));
-    if app.hf_files.is_empty() {
-        lines.push(Line::from(if app.hf_loading {
-            "Loading files…"
-        } else {
-            "No GGUF files"
-        }));
-    } else {
-        for (index, file) in app.hf_files.iter().enumerate() {
-            let size = if file.size == 0 {
-                String::new()
-            } else {
-                format!("  {}", human_bytes(file.size))
-            };
-            let label = format!("{}{size}", file.quant);
-            let style = if index == app.hf_file_index {
-                theme.selected()
-            } else {
-                Style::default().fg(theme.fg)
-            };
-            lines.push(Line::from(Span::styled(format!(" {label} "), style)));
-            lines.push(Line::from(Span::styled(
-                format!(
-                    "  {}",
-                    truncate(&file.path, inner.width.saturating_sub(2) as usize)
-                ),
-                Style::default().fg(theme.muted),
-            )));
-        }
-    }
-    frame.render_widget(Paragraph::new(lines), inner);
+    let [header, list] =
+        Layout::vertical([Constraint::Length(2.min(inner.height)), Constraint::Min(0)])
+            .areas(inner);
+    frame.render_widget(
+        Paragraph::new(format!(
+            "{}\nSelect a GGUF file to pull through Ollama",
+            app.hf_repo
+        ))
+        .style(Style::default().fg(theme.muted)),
+        header,
+    );
+    let items = app
+        .hf_files
+        .iter()
+        .map(|file| {
+            ListItem::new(vec![
+                Line::from(format!("{} {}", file.quant, human_bytes(file.size))),
+                Line::from(file.path.clone()),
+            ])
+        })
+        .collect::<Vec<_>>();
+    let mut state = ListState::default().with_selected(Some(app.hf_file_index));
+    frame.render_stateful_widget(
+        List::new(items).highlight_style(theme.selected()),
+        list,
+        &mut state,
+    );
+    app.navigation.rows(
+        list,
+        2,
+        state.offset(),
+        2,
+        app.hf_files.len().saturating_sub(state.offset()),
+    );
 }
 
 fn compact(n: u64) -> String {

@@ -126,6 +126,7 @@ pub enum ChatPane {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ModelsPane {
     List,
+    Running,
     Pull,
 }
 
@@ -225,6 +226,8 @@ pub enum Confirm {
 }
 
 pub struct App {
+    pub navigation: crate::navigation::State,
+    completion_dismissed: bool,
     pub commands: crate::commands::Palette,
     pub config: Config,
     config_path: PathBuf,
@@ -320,6 +323,8 @@ impl App {
         }
         let theme = theme::resolve(&config.theme, omarchy.as_ref());
         let mut app = Self {
+            navigation: crate::navigation::State::default(),
+            completion_dismissed: false,
             commands: crate::commands::Palette::default(),
             config,
             config_path,
@@ -642,46 +647,30 @@ impl App {
             self.key_settings(key);
             return false;
         }
-        if key.code == KeyCode::Tab
-            && self.screen == Screen::Chat
+        if matches!(
+            key.code,
+            KeyCode::Tab | KeyCode::Up | KeyCode::Down | KeyCode::Enter | KeyCode::Esc
+        ) && self.screen == Screen::Chat
             && self.chat_pane == ChatPane::Composer
             && (self.slash_palette_open() || self.model_palette_open())
         {
-            self.key_composer(key);
+            if key.code == KeyCode::Esc {
+                self.completion_dismissed = true;
+            } else {
+                self.key_composer(key);
+            }
+            return false;
+        }
+        if self.navigation_key(key) {
             return false;
         }
         if self.commands.open
             || (key.code == KeyCode::Char('k') && key.modifiers.contains(KeyModifiers::CONTROL))
         {
-            if let Some(action) = self.commands.handle(key, ACTIONS) {
-                if action.modifiers == KeyModifiers::ALT {
-                    let id = match action.key {
-                        KeyCode::Char('o') => "omarchy",
-                        KeyCode::Char('t') => "terminal",
-                        _ => "aurora",
-                    };
-                    self.apply_aurora_theme(id);
-                } else {
-                    match action.key {
-                        KeyCode::Char('1') => self.switch_screen(Screen::Chat),
-                        KeyCode::Char('2') => self.switch_screen(Screen::Models),
-                        KeyCode::Char('3') => self.switch_screen(Screen::Marketplace),
-                        KeyCode::Char('4') => self.switch_screen(Screen::Settings),
-                        KeyCode::Char('n') => self.new_chat(),
-                        _ => {
-                            return self.on_key(action.event());
-                        }
-                    }
-                }
+            let actions = self.command_actions();
+            if let Some(action) = self.commands.handle(key, &actions) {
+                self.dispatch_intent(action.target);
             }
-            return false;
-        }
-        if key.code == KeyCode::Tab {
-            self.switch_screen(self.screen.next());
-            return false;
-        }
-        if key.code == KeyCode::BackTab {
-            self.switch_screen(self.screen.prev());
             return false;
         }
 
@@ -1127,16 +1116,17 @@ impl App {
             Input::Handled | Input::Ignored => {}
         }
         if self.composer.value != before {
+            self.completion_dismissed = false;
             self.slash_pick = 0;
         }
     }
 
     pub fn slash_palette_open(&self) -> bool {
-        self.slash_query().is_some()
+        !self.completion_dismissed && self.slash_query().is_some()
     }
 
     pub fn model_palette_open(&self) -> bool {
-        self.model_argument().is_some()
+        !self.completion_dismissed && self.model_argument().is_some()
     }
 
     pub fn model_argument(&self) -> Option<&str> {
@@ -1289,6 +1279,9 @@ impl App {
     }
 
     fn key_models(&mut self, key: KeyEvent) {
+        if self.models_pane == ModelsPane::Running {
+            return;
+        }
         if self.models_pane == ModelsPane::Pull {
             if key.code == KeyCode::Esc {
                 self.models_pane = ModelsPane::List;
@@ -1330,11 +1323,7 @@ impl App {
             MarketPane::Search => match input(&mut self.hf_query, &key, false) {
                 Input::Submit => self.start_search(),
                 Input::Cancel => {
-                    if self.hf_query.value.is_empty() {
-                        self.hf_pane = MarketPane::Results;
-                    } else {
-                        self.hf_query.clear();
-                    }
+                    self.hf_pane = MarketPane::Results;
                 }
                 _ => {}
             },
@@ -2569,12 +2558,10 @@ pub const ACTIONS: &[crate::commands::Action] = &[
     crate::commands::Action::key("Marketplace screen", '3'),
     crate::commands::Action::key("Settings screen", '4'),
     crate::commands::Action::ctrl("New conversation", 'n'),
-    crate::commands::Action {
-        label: "Help",
-        key: KeyCode::F(1),
-        modifiers: KeyModifiers::NONE,
-    },
+    crate::commands::Action::function("Help", 1, crate::navigation::Intent::Command("Help")),
     crate::commands::Action::theme("Aurora theme", 'a'),
     crate::commands::Action::theme("Follow Omarchy theme", 'o'),
     crate::commands::Action::theme("Terminal theme", 't'),
 ];
+
+include!("navigation_impl.rs");

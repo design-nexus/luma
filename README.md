@@ -49,7 +49,7 @@ Tab and Shift+Tab move between Chat, Models, Marketplace, and Settings. `?` open
 
 The mouse wheel, Page Up, and Page Down scroll a reply. From a one-line prompt, Up and Down scroll it too. A bar on the right shows your place. Scrolling up stays put while a reply is still streaming.
 
-Enter sends. Alt+Enter or Ctrl+J inserts a line. Esc stops the reply. Ctrl+N starts a chat, Ctrl+M opens the model list, and Ctrl+P edits the system prompt. On a thinking reply, Esc moves to the transcript and Enter expands the thinking block.
+Enter sends. Alt+Enter or Ctrl+J inserts a line. Ctrl+X stops the reply. Ctrl+N starts a chat, Ctrl+M opens the model list, and Ctrl+P edits the system prompt. On a thinking reply, Esc moves to the transcript and Enter expands the thinking block.
 
 ### Slash commands
 
@@ -101,6 +101,10 @@ cargo run
 
 ## Aurora interface
 
-New installations use Aurora: charcoal surfaces, lavender focus, cyan data, quiet borders, and compact headers. Existing explicit theme choices and legacy config/data locations are retained. `Ctrl+K` searches actions; Esc closes the palette. Actions use the same confirmations as their keyboard shortcuts. Tab changes focus where panes are available. Details scroll with Page Up / Page Down. Narrow layouts show the active pane; the minimum terminal is 30×10.
+New installations use Aurora: charcoal surfaces, lavender focus, cyan data, quiet borders, and compact headers. Existing explicit theme choices and legacy config/data locations are retained. `Ctrl+K` searches actions; Esc closes the palette. Actions use the same confirmations as their keyboard shortcuts. Tab / Shift+Tab changes screens; F6 / Shift+F6 changes panes. F2 opens Navigation. Details scroll with Page Up / Page Down. Narrow layouts show the active pane; the minimum terminal is 30×14.
 
 Build requirements: Rust 1.88 or newer, Ratatui 0.30.2, Crossterm 0.29. Run `cargo test --locked` before `./install.sh`. The command is `luma`; no compatibility command aliases are installed.
+
+See [shared navigation](docs/navigation.md) for keyboard and mouse controls.
+
+Screenshot refreshed from an actual Foot render with sample data.

@@ -8,7 +8,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Gauge, Paragraph};
 use ratatui::Frame;
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+use unicode_width::UnicodeWidthChar;
 
 use crate::app::{App, Screen};
 use crate::field::Field;
@@ -16,11 +16,12 @@ use crate::theme::Theme;
 use crate::util::{human_bytes, truncate};
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
+    app.navigation.begin(frame.area());
     let area = frame.area();
-    if area.width < 30 || area.height < 10 {
+    if area.width < 30 || area.height < 14 {
         frame.render_widget(
             Paragraph::new(
-                "luma · needs 30×10
+                "luma · needs 30×14
 Resize terminal; Ctrl+C quits",
             ),
             area,
@@ -31,14 +32,12 @@ Resize terminal; Ctrl+C quits",
     frame.render_widget(Block::default().style(theme.base()), area);
 
     app.start_hit = None;
-    let footer_h = if app.pull.is_some() || app.starting {
-        2
-    } else {
-        1
-    };
+    let chrome = chrome(&theme);
+    let area = chrome.shell(frame, area);
+    let footer_h = if area.height >= 26 { 4 } else { 3 };
     let [status, tabs, body, footer] = Layout::vertical([
-        Constraint::Length(1),
-        Constraint::Length(1),
+        Constraint::Length(crate::aurora::title_height(area.height)),
+        Constraint::Length(3),
         Constraint::Min(0),
         Constraint::Length(footer_h),
     ])
@@ -52,6 +51,7 @@ Resize terminal; Ctrl+C quits",
         Screen::Marketplace => marketplace::draw(frame, app, body),
         Screen::Settings => settings::draw(frame, app, body),
     }
+    let footer = chrome.footer(frame, footer);
     draw_footer(frame, app, &theme, footer);
 
     if app.model_picker {
@@ -65,61 +65,49 @@ Resize terminal; Ctrl+C quits",
     }
     if let Some(confirm) = app.confirm.as_ref() {
         draw_confirm(frame, &theme, area, confirm);
+        app.navigation
+            .dialog_buttons(frame, centered(area, 56, 7), app.navigation_skin());
     }
     if app.help {
         draw_help(frame, &theme, area);
     }
     app.commands.draw(
         frame,
-        crate::app::ACTIONS,
+        &app.command_actions(),
         app.theme.bg,
         app.theme.fg,
         app.theme.accent,
         app.theme.bg_raised,
     );
+    app.draw_navigation(frame);
+}
+
+fn chrome(theme: &Theme) -> crate::aurora::Chrome {
+    crate::aurora::Chrome {
+        base: theme.base(),
+        muted: Style::default().fg(theme.muted),
+        accent: Style::default().fg(theme.accent),
+        data: Style::default().fg(theme.cyan),
+        border: Style::default().fg(theme.border),
+        deep: theme.status(),
+    }
 }
 
 fn draw_status(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
-    let model = short_model(
-        app.chat()
-            .map(|c| c.model.as_str())
-            .filter(|m| !m.is_empty())
-            .unwrap_or("no model"),
-    );
-    let status_style = if app.status_is_error {
-        Style::default().fg(theme.red)
+    let (connection, color) = connection(app, theme);
+    let status = if app.status_is_error && !app.status.is_empty() {
+        truncate(&app.status, 24)
     } else {
-        Style::default().fg(theme.fg_dim)
+        format!("● Ollama {connection}")
     };
-    let mut spans = vec![
-        Span::styled(
-            " luma ",
-            Style::default()
-                .fg(theme.accent)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(format!(" {model} "), theme.status()),
-    ];
-    let used: usize = spans
-        .iter()
-        .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
-        .sum();
-    let room = (area.width as usize).saturating_sub(used + 1);
-    if !app.status.is_empty() && room > 4 {
-        spans.push(Span::styled(
-            format!(" {} ", truncate(&app.status, room)),
-            status_style,
-        ));
-    }
-    frame.render_widget(
-        Paragraph::new(Line::from(spans)).style(theme.status()),
+    chrome(theme).title(
+        frame,
         area,
+        "luma",
+        "Local intelligence",
+        &status,
+        Style::default().fg(color),
     );
-}
-
-fn short_model(name: &str) -> String {
-    let tail = name.rsplit('/').next().unwrap_or(name);
-    truncate(tail, 18)
 }
 
 pub fn connection(app: &App, theme: &Theme) -> (String, ratatui::style::Color) {
@@ -131,33 +119,12 @@ pub fn connection(app: &App, theme: &Theme) -> (String, ratatui::style::Color) {
 }
 
 fn draw_tabs(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
-    let mut spans = Vec::new();
-    for (index, screen) in Screen::ALL.iter().enumerate() {
-        if index > 0 {
-            spans.push(Span::styled("  ", theme.base()));
-        }
-        let style = if *screen == app.screen {
-            Style::default()
-                .fg(theme.accent)
-                .bg(theme.bg)
-                .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
-        } else {
-            Style::default().fg(theme.muted).bg(theme.bg)
-        };
-        spans.push(Span::styled(format!(" {} ", screen.label()), style));
-    }
-    frame.render_widget(Paragraph::new(Line::from(spans)).style(theme.base()), area);
+    app.navigation_bar(frame, area);
 }
 
 fn draw_footer(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
-    let hint = match app.screen {
-        Screen::Chat => "Enter send  Alt+Enter ↵  Esc stop  ^K actions",
-        Screen::Models => "j/k move  enter use  d delete  u unload  p pull",
-        Screen::Marketplace => {
-            "enter search, open, or pull  ^S sort  esc back   gated models need HF_TOKEN"
-        }
-        Screen::Settings => "j/k move  enter edit  ← → nudge  esc cancel",
-    };
+    let hints = app.footer_hints();
+    let hint = hints.as_slice();
     if app.starting {
         let [gauge_area, hint_area] =
             Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).areas(area);
@@ -198,41 +165,47 @@ fn draw_footer(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     }
 }
 
-fn draw_hint(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect, hint: &str) {
-    let (label, color) = connection(app, theme);
-    let label = format!(" {label} ");
-    let label_w = UnicodeWidthStr::width(label.as_str()) + 1;
-    let mut prefix = Vec::new();
-    let mut prefix_w = 0usize;
+fn draw_hint(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect, hint: &[(&str, &str)]) {
+    let mut spans = Vec::new();
     if app.can_start() {
         let button = " Start ";
         app.start_hit = Some((area.x, area.y, button.len() as u16, 1));
-        prefix.push(Span::styled(
+        app.navigation.hit(
+            Rect::new(area.x, area.y, button.len() as u16, 1),
+            crate::navigation::Intent::Command("Start Ollama"),
+        );
+        spans.push(Span::styled(
             button,
             theme.accent_style().add_modifier(Modifier::BOLD),
         ));
-        prefix_w = button.len();
+        spans.push(Span::raw(" "));
     }
-    let hint_w = (area.width as usize).saturating_sub(label_w + prefix_w);
-    let hint = format!(" {}", truncate(hint, hint_w.saturating_sub(1)));
-    let hint_w_drawn = UnicodeWidthStr::width(hint.as_str());
-    let pad = (area.width as usize).saturating_sub(hint_w_drawn + label_w + prefix_w);
-    let bg = theme.bg_deep;
-    let mut spans = prefix;
-    spans.push(Span::styled(hint, Style::default().fg(theme.muted).bg(bg)));
-    spans.push(Span::styled(" ".repeat(pad), Style::default().bg(bg)));
-    spans.push(Span::styled("●", Style::default().fg(color).bg(bg)));
-    spans.push(Span::styled(
-        label,
-        Style::default().fg(theme.fg_dim).bg(bg),
-    ));
-    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+    spans.extend(
+        crate::navigation::shortcuts(
+            hint,
+            area.width
+                .saturating_sub(if app.can_start() { 8 } else { 0 }),
+            Style::default().fg(theme.accent),
+            Style::default().fg(theme.muted),
+        )
+        .spans,
+    );
+    frame.render_widget(
+        Paragraph::new(Line::from(spans)).style(theme.status()),
+        Rect::new(area.x, area.y, area.width, 1),
+    );
+    if app.screen == Screen::Marketplace && area.height > 1 {
+        frame.render_widget(
+            Paragraph::new("Gated models need HF_TOKEN").style(theme.status().fg(theme.muted)),
+            Rect::new(area.x, area.y + 1, area.width, 1),
+        );
+    }
 }
 
 fn draw_help(frame: &mut Frame, theme: &Theme, area: Rect) {
     let lines = [
         "Chat",
-        "  enter send   alt+enter or ^J newline   esc stops a reply",
+        "  enter send   alt+enter or ^J newline   ctrl+x stops a reply",
         "  wheel, pgup/pgdn, or up/down from the prompt scroll the reply",
         "  ^N new chat   ^M models   ^P system prompt",
         "",
@@ -248,7 +221,7 @@ fn draw_help(frame: &mut Frame, theme: &Theme, area: Rect) {
         "  /help  /quit  /q",
         "",
         "Settings can start Ollama with the app, and stop it on quit.",
-        "tab / shift+tab switch screens    ? help    q or ^C quit",
+        "F2 Navigate  F6/shift+F6 panes  tab/shift+tab screens",
     ];
     overlay(frame, theme, area, " Help ", &lines, 68, 24);
 }
@@ -316,6 +289,7 @@ pub fn panel(title: &str, focused: bool, theme: &Theme) -> Block<'static> {
     let border = if focused { theme.accent } else { theme.border };
     Block::default()
         .borders(Borders::ALL)
+        .border_type(ratatui::widgets::BorderType::Rounded)
         .border_style(Style::default().fg(border))
         .title(format!(" {title} "))
         .style(theme.base())
@@ -448,7 +422,13 @@ mod tests {
         let mut terminal = Terminal::new(TestBackend::new(100, 32)).unwrap();
         terminal.draw(|f| draw(f, &mut app)).unwrap();
         let chat = buffer_text(&terminal);
-        assert!(chat.contains("luma"), "{chat}");
+        assert!(
+            (0..8).any(|y| (0..100).any(|x| matches!(
+                terminal.backend().buffer()[(x, y)].symbol(),
+                "█" | "▀" | "▄"
+            ))),
+            "pixel title must be visible"
+        );
         assert!(chat.contains("Chat"), "{chat}");
         assert!(chat.contains("Conversations"), "{chat}");
 
@@ -516,6 +496,127 @@ mod aurora_audit {
         app.chat_pane = crate::app::ChatPane::Composer;
         app
     }
+
+    #[tokio::test]
+    async fn common_navigation_contract_preserves_focus_and_drafts() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = fixture(dir.path().join("config.toml"));
+        app.focus_pane(0);
+        if app.navigation_editing() {
+            let _ = app.on_key(key(KeyCode::Esc));
+        }
+        let screen = app.navigation_screen();
+        let pane = app.focused_pane();
+        let _ = app.on_key(key(KeyCode::Tab));
+        assert_eq!(
+            app.navigation_screen(),
+            crate::navigation::step(
+                screen,
+                app.navigation_entries()
+                    .iter()
+                    .filter(|e| matches!(e.target, crate::navigation::Intent::Screen(_)))
+                    .count(),
+                1
+            )
+        );
+        if app.navigation_editing() {
+            let _ = app.on_key(key(KeyCode::Esc));
+        }
+        let _ = app.on_key(key(KeyCode::BackTab));
+        assert_eq!(app.navigation_screen(), screen);
+        let _ = app.on_key(key(KeyCode::F(6)));
+        assert_eq!(
+            app.focused_pane(),
+            crate::navigation::step(pane, app.pane_names().len(), 1)
+        );
+        let _ = app.on_key(KeyEvent::new(KeyCode::F(6), KeyModifiers::SHIFT));
+        assert_eq!(app.focused_pane(), pane);
+        let _ = app.on_key(key(KeyCode::F(2)));
+        assert!(app.navigation.open);
+        let _ = app.on_key(key(KeyCode::Char('1')));
+        assert!(!app.navigation.open);
+        assert_eq!(app.navigation_screen(), 0);
+        app.select_screen(screen);
+        let _ = app.on_key(key(KeyCode::F(2)));
+        assert!(app.navigation.open);
+
+        let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        assert!(crate::audit::text(terminal.backend().buffer()).contains("Navigate"));
+        let _ = app.on_key(key(KeyCode::Esc));
+        assert!(!app.navigation.open);
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let mut hit = None;
+        for y in 0..buffer.area.height {
+            for x in 0..buffer.area.width.saturating_sub(3) {
+                if buffer[(x, y)].symbol() == "("
+                    && buffer[(x + 1, y)].symbol() == "F"
+                    && buffer[(x + 2, y)].symbol() == "2"
+                {
+                    hit = Some((x, y));
+                    break;
+                }
+            }
+            if hit.is_some() {
+                break;
+            }
+        }
+        let (x, y) = hit.expect("visible clickable navigation");
+        app.navigation_mouse(crossterm::event::MouseEvent {
+            kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            column: x,
+            row: y,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert!(app.navigation.open);
+        let _ = app.on_key(key(KeyCode::Esc));
+
+        let _ = app.on_key(commands());
+        assert!(app.commands.open);
+        let _ = app.on_key(key(KeyCode::Esc));
+    }
+    #[tokio::test]
+    async fn all_screens_and_focus_targets_fit_the_navigation_matrix() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = fixture(dir.path().join("config.toml"));
+        let screens = app
+            .navigation_entries()
+            .iter()
+            .filter(|e| matches!(e.target, crate::navigation::Intent::Screen(_)))
+            .count();
+        for screen in 0..screens {
+            app.select_screen(screen);
+            for pane in 0..app.pane_names().len() {
+                app.focus_pane(pane);
+                for &(w, h) in &crate::audit::SIZES[..4] {
+                    let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
+                    terminal.draw(|f| draw(f, &mut app)).unwrap();
+                    let buffer = terminal.backend().buffer();
+                    assert!(
+                        crate::audit::text(buffer).contains("(F2)"),
+                        "screen {screen} pane {pane} must expose navigation at {w}x{h}"
+                    );
+                    crate::audit::verify_footer(buffer);
+                    crate::audit::capture(
+                        "luma",
+                        &format!("navigation-screen{screen}-pane{pane}"),
+                        buffer,
+                    );
+                    let before = app.navigation_screen();
+                    app.navigation_mouse(crossterm::event::MouseEvent {
+                        kind: crossterm::event::MouseEventKind::Down(
+                            crossterm::event::MouseButton::Left,
+                        ),
+                        column: w + 1,
+                        row: h + 1,
+                        modifiers: KeyModifiers::NONE,
+                    });
+                    assert_eq!(app.navigation_screen(), before);
+                }
+            }
+        }
+    }
     #[test]
     fn tab_completes_before_navigation_and_picker_owns_keys() {
         let dir = tempfile::tempdir().unwrap();
@@ -535,6 +636,32 @@ mod aurora_audit {
         assert!(app.commands.open);
         app.on_key(key(KeyCode::Tab));
         assert!(app.screen == Screen::Chat);
+    }
+    #[test]
+    #[ignore = "interactive mock fixture for visual QA"]
+    fn live_preview() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = fixture(dir.path().join("config.toml"));
+        match std::env::var("AURORA_NAV_PREVIEW").as_deref() {
+            Ok("menu") => app.navigation.toggle(),
+            Ok("actions") => app.commands.open = true,
+            Ok("focused") => app.focus_pane(1),
+            _ => {}
+        }
+        crate::audit::live_preview(
+            &mut app,
+            |f, a| draw(f, a),
+            |a, k| {
+                if let KeyCode::Char(c @ '1'..='4') = k.code {
+                    a.screen = Screen::ALL[c as usize - '1' as usize];
+                } else if matches!(
+                    k.code,
+                    KeyCode::Tab | KeyCode::BackTab | KeyCode::Down | KeyCode::Up | KeyCode::Esc
+                ) {
+                    a.on_key(k);
+                }
+            },
+        );
     }
     #[test]
     fn responsive_render_matrix() {
@@ -558,9 +685,13 @@ mod aurora_audit {
             let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
             term.draw(|f| draw(f, &mut app)).unwrap();
             let buffer = term.backend().buffer();
-            if w >= 30 && h >= 10 {
-                assert!(crate::audit::text(buffer).contains("luma"));
+            if w >= 30 && h >= 14 {
+                assert!(buffer
+                    .content
+                    .iter()
+                    .any(|cell| matches!(cell.symbol(), "█" | "▀" | "▄")));
             }
+            crate::audit::verify_footer(buffer);
             crate::audit::capture("luma", "main", buffer);
         }
         app.chat_pane = crate::app::ChatPane::Sidebar;
@@ -586,6 +717,7 @@ mod aurora_audit {
             for &(w, h) in &crate::audit::SIZES[..4] {
                 let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
                 term.draw(|f| draw(f, &mut app)).unwrap();
+                crate::audit::verify_footer(term.backend().buffer());
                 crate::audit::capture("luma", "offline", term.backend().buffer());
             }
         }

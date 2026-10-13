@@ -1,5 +1,5 @@
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
     List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
@@ -16,14 +16,19 @@ pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
     if area.height < 6 || area.width < 10 {
         return;
     }
+    let area = crate::aurora::body(area);
     let theme = app.theme.clone();
     let content = if app.show_chats && (area.width >= 80 || app.chat_pane == ChatPane::Sidebar) {
         if area.width < 70 && app.chat_pane == ChatPane::Sidebar {
             draw_sidebar(frame, app, &theme, area);
             return;
         }
-        let [side, content] =
-            Layout::horizontal([Constraint::Length(24), Constraint::Min(1)]).areas(area);
+        let [side, _gutter, content] = Layout::horizontal([
+            Constraint::Length(if area.width >= 100 { 29 } else { 24 }),
+            Constraint::Length(3),
+            Constraint::Min(1),
+        ])
+        .areas(area);
         draw_sidebar(frame, app, &theme, side);
         content
     } else {
@@ -33,11 +38,25 @@ pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
         &app.composer.value,
         content.width.saturating_sub(2) as usize,
     );
-    let composer_h = (text_rows as u16 + 2)
-        .min(content.height.saturating_sub(1))
+    let roomy = area.height >= 18;
+    let composer_min = if roomy { 5 } else { 3 };
+    let composer_h = (text_rows as u16 + if roomy { 4 } else { 2 })
+        .max(composer_min)
+        .min(content.height.saturating_sub(3))
         .max(3);
-    let [transcript, composer_area] =
-        Layout::vertical([Constraint::Min(1), Constraint::Length(composer_h)]).areas(content);
+    let gap_h = u16::from(content.height >= 15);
+    let desired_transcript = transcript_lines(app, &theme, content.width as usize).len() as u16 + 2;
+    let [transcript, _gap, composer_area, _space] = Layout::vertical([
+        Constraint::Length(
+            desired_transcript
+                .max(4)
+                .min(content.height.saturating_sub(composer_h + gap_h)),
+        ),
+        Constraint::Length(gap_h),
+        Constraint::Length(composer_h),
+        Constraint::Min(0),
+    ])
+    .areas(content);
     draw_transcript(frame, app, &theme, transcript);
     draw_composer(frame, app, &theme, composer_area);
     if app.model_palette_open() {
@@ -48,19 +67,45 @@ pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
 }
 
 fn draw_sidebar(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+    app.navigation.pane(area, 0);
     let focused = app.chat_pane == ChatPane::Sidebar;
-    let block = panel("Conversations", focused, theme);
+    let border = if focused { theme.accent } else { theme.border };
+    let area = crate::aurora::sidebar(frame, area, Style::default().fg(border));
+    let spaced = area.height >= 18;
+    let list_h = (app.chats.len() as u16 * if spaced { 2 } else { 1 })
+        .max(1)
+        .min(area.height.saturating_sub(5));
+    let [heading, list_area, _gap, note, _space] = Layout::vertical([
+        Constraint::Length(2),
+        Constraint::Length(list_h),
+        Constraint::Length(1),
+        Constraint::Length(2),
+        Constraint::Min(0),
+    ])
+    .areas(area);
+    frame.render_widget(
+        Paragraph::new("Conversations").style(Style::default().fg(theme.accent)),
+        heading,
+    );
     let items: Vec<ListItem> = app
         .chats
         .iter()
-        .map(|chat| {
+        .enumerate()
+        .map(|(index, chat)| {
             let marker = if app.streaming_chat.as_deref() == Some(chat.id.as_str()) {
                 "● "
+            } else if index == app.chat_index {
+                "▸ "
             } else {
                 "  "
             };
             let title = format!("{marker}{}", chat.title);
-            ListItem::new(truncate(&title, area.width.saturating_sub(4) as usize))
+            let title = Line::from(truncate(&title, area.width.saturating_sub(1) as usize));
+            ListItem::new(if spaced {
+                vec![title, Line::from("")]
+            } else {
+                vec![title]
+            })
         })
         .collect();
     let mut state = ListState::default();
@@ -68,23 +113,64 @@ fn draw_sidebar(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         state.select(Some(app.chat_index));
     }
     frame.render_stateful_widget(
-        List::new(items)
-            .block(block)
-            .highlight_style(theme.selected()),
-        area,
+        List::new(items).highlight_style(theme.selected()),
+        list_area,
         &mut state,
+    );
+    app.navigation.rows(
+        list_area,
+        0,
+        state.offset(),
+        if spaced { 2 } else { 1 },
+        app.chats.len().saturating_sub(state.offset()),
+    );
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("(Ctrl+N)", Style::default().fg(theme.accent)),
+            Span::styled(" new conversation", Style::default().fg(theme.muted)),
+        ])),
+        note,
     );
 }
 
 fn draw_transcript(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
+    app.navigation.pane(area, 1);
     let focused = app.chat_pane == ChatPane::Transcript;
     let title = app
         .chat()
         .map(|c| truncate(&c.title, 40))
         .unwrap_or_else(|| "Chat".into());
-    let block = panel(&title, focused, theme);
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
+    let model = app
+        .chat()
+        .map(|c| c.model.as_str())
+        .filter(|m| !m.is_empty())
+        .unwrap_or("no model");
+    let [heading, messages] =
+        Layout::vertical([Constraint::Length(2), Constraint::Min(1)]).areas(area);
+    let header_inner = heading;
+    if focused {
+        frame.render_widget(
+            ratatui::widgets::Block::default()
+                .borders(ratatui::widgets::Borders::LEFT)
+                .border_style(Style::default().fg(theme.accent)),
+            area,
+        );
+    }
+    let [title_area, model_area] = Layout::horizontal([
+        Constraint::Min(1),
+        Constraint::Length(model.chars().count().min(24) as u16 + 1),
+    ])
+    .areas(header_inner);
+    frame.render_widget(
+        Paragraph::new(Span::styled(title, Style::default().fg(theme.fg))),
+        title_area,
+    );
+    frame.render_widget(
+        Paragraph::new(Span::styled(model, Style::default().fg(theme.muted)))
+            .alignment(ratatui::layout::Alignment::Right),
+        model_area,
+    );
+    let inner = messages;
     if inner.width == 0 || inner.height == 0 {
         return;
     }
@@ -180,7 +266,7 @@ fn message_lines(
     let mut lines = Vec::new();
     let name = assistant_name.trim();
     let name = if name.is_empty() { "Luma" } else { name };
-    let marker = if selected { "▌ " } else { "  " };
+    let marker = if selected { "▌ " } else { "" };
     lines.push(Line::from(Span::styled(
         format!("{marker}{name} · local response"),
         Style::default()
@@ -255,7 +341,7 @@ fn message_lines(
         } else {
             for wrapped in wrap(line, width.saturating_sub(2)) {
                 lines.push(Line::from(Span::styled(
-                    format!("  {wrapped}"),
+                    wrapped,
                     Style::default().fg(theme.fg),
                 )));
             }
@@ -279,88 +365,21 @@ fn user_message_lines(
     message: &Message,
     theme: &Theme,
     width: usize,
-    _selected: bool,
+    selected: bool,
 ) -> Vec<Line<'static>> {
-    let bg = lift(theme.bg);
-    let text_style = Style::default().fg(theme.fg).bg(bg);
-    let prompt_style = Style::default()
-        .fg(theme.cyan)
-        .bg(bg)
-        .add_modifier(Modifier::BOLD);
-    let prompt = "You › ";
-    let prompt_cols = crate::util::width_of(prompt).max(1);
-    let text_cols = width.saturating_sub(prompt_cols).max(1);
-    let mut lines = Vec::new();
-    let body = message.content.trim();
-    if body.is_empty() || width == 0 {
-        lines.push(user_line(prompt, prompt_style, "", text_style, text_cols));
-        return lines;
-    }
-    let mut first = true;
-    for para in body.split('\n') {
-        if para.is_empty() {
-            lines.push(user_line(
-                &" ".repeat(prompt_cols),
-                text_style,
-                "",
-                text_style,
-                text_cols,
-            ));
-            continue;
-        }
-        for wrapped in wrap(para, text_cols) {
-            if first {
-                lines.push(user_line(
-                    prompt,
-                    prompt_style,
-                    &wrapped,
-                    text_style,
-                    text_cols,
-                ));
-                first = false;
-            } else {
-                lines.push(user_line(
-                    &" ".repeat(prompt_cols),
-                    text_style,
-                    &wrapped,
-                    text_style,
-                    text_cols,
-                ));
-            }
+    let mut lines = vec![Line::from(Span::styled(
+        if selected { "▌ You" } else { "You" },
+        Style::default().fg(theme.cyan).add_modifier(Modifier::BOLD),
+    ))];
+    for paragraph in message.content.trim().split('\n') {
+        for line in wrap(paragraph, width.max(1)) {
+            lines.push(Line::from(Span::styled(
+                line,
+                Style::default().fg(theme.fg),
+            )));
         }
     }
     lines
-}
-
-fn user_line(
-    prefix: &str,
-    prefix_style: Style,
-    text: &str,
-    text_style: Style,
-    text_cols: usize,
-) -> Line<'static> {
-    let shown = if crate::util::width_of(text) > text_cols {
-        truncate(text, text_cols)
-    } else {
-        text.to_string()
-    };
-    let pad = text_cols.saturating_sub(crate::util::width_of(&shown));
-    Line::from(vec![
-        Span::styled(prefix.to_string(), prefix_style),
-        Span::styled(shown, text_style),
-        Span::styled(" ".repeat(pad), text_style),
-    ])
-}
-
-fn lift(color: Color) -> Color {
-    match color {
-        Color::Rgb(r, g, b) => Color::Rgb(bump(r), bump(g), bump(b)),
-        other => other,
-    }
-}
-
-fn bump(channel: u8) -> u8 {
-    channel.saturating_add(18)
 }
 
 fn composer_rows(value: &str, width: usize) -> usize {
@@ -424,6 +443,7 @@ fn draw_model_palette(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         )));
     }
     frame.render_widget(Paragraph::new(lines), inner);
+    app.navigation.rows(inner, 97, start, 1, window.len());
 }
 
 fn draw_slash_palette(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
@@ -488,29 +508,67 @@ fn draw_slash_palette(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         ]));
     }
     frame.render_widget(Paragraph::new(lines), inner);
+    app.navigation.rows(inner, 96, start, 1, window.len());
 }
 
 fn draw_composer(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+    app.navigation.pane(area, 2);
     let focused = app.chat_pane == ChatPane::Composer
         && !app.model_picker
         && !app.renaming
         && !app.editing_system;
-    let block = panel(
-        if app.streaming {
-            "Generating"
-        } else {
-            "Message"
-        },
-        focused,
-        theme,
-    );
+    let roomy = area.height >= 5;
+    let block = ratatui::widgets::Block::bordered()
+        .border_type(ratatui::widgets::BorderType::Rounded)
+        .border_style(Style::default().fg(if focused { theme.accent } else { theme.border }))
+        .padding(ratatui::widgets::Padding::horizontal(1))
+        .style(theme.base());
     let inner = block.inner(area);
     frame.render_widget(block, area);
+    let inner = if roomy {
+        let [heading, field] =
+            Layout::vertical([Constraint::Length(2), Constraint::Min(1)]).areas(inner);
+        let model = app
+            .chat()
+            .map(|chat| chat.model.as_str())
+            .unwrap_or("no model");
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(
+                    if app.streaming {
+                        "Generating"
+                    } else {
+                        "Message"
+                    },
+                    Style::default().fg(theme.accent),
+                ),
+                Span::styled(format!(" · {model}"), Style::default().fg(theme.muted)),
+            ])),
+            heading,
+        );
+        field
+    } else {
+        inner
+    };
+    let [prompt, inner] =
+        Layout::horizontal([Constraint::Length(2), Constraint::Min(0)]).areas(inner);
+    frame.render_widget(
+        Paragraph::new("› ").style(Style::default().fg(theme.cyan)),
+        prompt,
+    );
     if inner.width == 0 || inner.height == 0 {
         return;
     }
     let style = Style::default().fg(theme.fg).bg(theme.bg);
-    let paragraph = if focused {
+    let paragraph = if app.composer.value.is_empty() {
+        Paragraph::new(Line::from(vec![
+            Span::styled("Ask a follow-up…", Style::default().fg(theme.muted)),
+            Span::styled(
+                if focused { " ▌" } else { "" },
+                Style::default().fg(theme.accent),
+            ),
+        ]))
+    } else if focused {
         field_paragraph(
             &app.composer,
             inner.width as usize,
@@ -557,6 +615,13 @@ pub fn draw_model_picker(frame: &mut Frame, app: &App, area: Rect) {
         List::new(items).highlight_style(theme.selected()),
         list_area,
         &mut state,
+    );
+    app.navigation.rows(
+        list_area,
+        98,
+        state.offset(),
+        1,
+        app.model_choices().len().saturating_sub(state.offset()),
     );
 }
 
