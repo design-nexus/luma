@@ -35,7 +35,7 @@ pub struct Config {
 }
 
 fn default_theme() -> String {
-    "catppuccin-mocha".into()
+    "aurora".into()
 }
 fn default_host() -> String {
     "http://127.0.0.1:11434".into()
@@ -53,7 +53,7 @@ fn default_keep_alive() -> String {
     "5m".into()
 }
 fn default_assistant_name() -> String {
-    "assistant".into()
+    "Luma".into()
 }
 fn default_true() -> bool {
     true
@@ -163,13 +163,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn first_launch_follows_omarchy_only_when_installed() {
+    fn first_launch_uses_aurora_with_or_without_omarchy() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
         let with = Config::load(&path, true);
-        assert_eq!(with.theme, "omarchy");
+        assert_eq!(with.theme, "aurora");
         let without = Config::load(&path, false);
-        assert_eq!(without.theme, "catppuccin-mocha");
+        assert_eq!(without.theme, "aurora");
         assert!(!path.exists());
     }
 

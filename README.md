@@ -1,8 +1,10 @@
-# ollatui
+# Luma
+
+![Luma Aurora interface](docs/screenshot.png)
 
 A terminal UI for [Ollama](https://ollama.com). Chat with local models, pull from the Ollama library or a searchable Hugging Face GGUF catalog, and theme the whole interface, including following the Omarchy theme when it is installed.
 
-ollatui talks to the Ollama HTTP server at `http://127.0.0.1:11434` by default. It does not run models itself.
+luma talks to the Ollama HTTP server at `http://127.0.0.1:11434` by default. It does not run models itself.
 
 ## Install
 
@@ -11,18 +13,18 @@ You need a stable Rust toolchain (`cargo`) and [Ollama](https://ollama.com/downl
 From a clone:
 
 ```bash
-git clone https://github.com/design-nexus/ollatui.git
-cd ollatui
+git clone https://github.com/design-nexus/luma.git
+cd luma
 ./install.sh
 ```
 
 Or in one step:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/design-nexus/ollatui/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/design-nexus/luma/main/install.sh | bash
 ```
 
-The binary is installed to `~/.local/bin/ollatui`. Use another location with `--prefix`:
+The binary is installed to `~/.local/bin/luma`. Use another location with `--prefix`:
 
 ```bash
 ./install.sh --prefix "$HOME/.local"
@@ -34,13 +36,13 @@ Build without installing:
 
 ```bash
 cargo build --release
-./target/release/ollatui
+./target/release/luma
 ```
 
 ## Usage
 
 ```bash
-ollatui
+luma
 ```
 
 Tab and Shift+Tab move between Chat, Models, Marketplace, and Settings. `?` opens the keymap. `q` quits when you are not typing. Ctrl+C always quits.
@@ -71,15 +73,15 @@ Type these in the prompt and press Enter.
 
 **Models.** Lists what is installed and what is loaded. Enter chats with the highlighted model. `d` deletes it, `u` unloads it, and `p` pulls by name.
 
-**Marketplace.** Searches the Hugging Face Hub for GGUF repos, sorted by downloads, likes, or last update. Enter a repo to list its files, then Enter again to pull one. The download goes through Ollama as `hf.co/user/repo:file.gguf`, so resume and registration stay with Ollama. A progress bar at the bottom shows bytes received. Gated repos need `HF_TOKEN` in the Ollama service environment. Hugging Face serves the file from a CDN host; ollatui allows that redirect for `hf.co` pulls.
+**Marketplace.** Searches the Hugging Face Hub for GGUF repos, sorted by downloads, likes, or last update. Enter a repo to list its files, then Enter again to pull one. The download goes through Ollama as `hf.co/user/repo:file.gguf`, so resume and registration stay with Ollama. A progress bar at the bottom shows bytes received. Gated repos need `HF_TOKEN` in the Ollama service environment. Hugging Face serves the file from a CDN host; luma allows that redirect for `hf.co` pulls.
 
-**Settings.** Host, default model, temperature, top P, context length, seed, keep alive, and token stats. Two switches control the service: start Ollama when ollatui opens, and stop it when ollatui quits. Both are off until you turn them on. Changes are saved immediately and sent as Ollama options on the next reply.
+**Settings.** Host, default model, temperature, top P, context length, seed, keep alive, and token stats. Two switches control the service: start Ollama when luma opens, and stop it when luma quits. Both are off until you turn them on. Changes are saved immediately and sent as Ollama options on the next reply.
 
 ## Themes
 
 The built-in list is the set that shows up across terminal and editor roundups: Catppuccin (Mocha, Macchiato, Frappé, Latte), Tokyo Night (Night, Storm, Day), Dracula, Gruvbox (dark and light), Nord, One Dark Pro and One Light, Solarized (dark and light), Rosé Pine (main, Moon, Dawn), Kanagawa, Everforest Dark, and Monokai Pro.
 
-**Follow Omarchy** reads `~/.local/state/omarchy/current/theme/colors.toml` and the theme name beside it. Older installs are read from `~/.config/omarchy/current/`. The first launch uses this when the file exists, otherwise Catppuccin Mocha. While Follow Omarchy is selected, changing the desktop theme repaints the app. The row stays in the list on machines without Omarchy and cannot be applied there.
+**Follow Omarchy** reads `~/.local/state/omarchy/current/theme/colors.toml` and the theme name beside it. Older installs are read from `~/.config/omarchy/current/`. New installations use Aurora. Select Follow Omarchy explicitly to use the desktop theme. While Follow Omarchy is selected, changing the desktop theme repaints the app. The row stays in the list on machines without Omarchy and cannot be applied there.
 
 **Terminal** uses ANSI colors, so the UI picks up the palette of Ghostty, Kitty, Alacritty, Foot, or whatever you are running.
 
@@ -96,3 +98,9 @@ The built-in list is the set that shows up across terminal and editor roundups: 
 cargo test
 cargo run
 ```
+
+## Aurora interface
+
+New installations use Aurora: charcoal surfaces, lavender focus, cyan data, quiet borders, and compact headers. Existing explicit theme choices and legacy config/data locations are retained. `Ctrl+K` searches actions; Esc closes the palette. Actions use the same confirmations as their keyboard shortcuts. Tab changes focus where panes are available. Details scroll with Page Up / Page Down. Narrow layouts show the active pane; the minimum terminal is 30×10.
+
+Build requirements: Rust 1.88 or newer, Ratatui 0.30.2, Crossterm 0.29. Run `cargo test --locked` before `./install.sh`. The command is `luma`; no compatibility command aliases are installed.

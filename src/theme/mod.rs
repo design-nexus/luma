@@ -67,6 +67,11 @@ pub struct Choice {
 /// Built-in catalog. Omarchy is resolved from disk, not from this list's colors.
 pub static CHOICES: &[Choice] = &[
     Choice {
+        id: "aurora",
+        label: "Aurora",
+        group: "Built-in",
+    },
+    Choice {
         group: "System",
         id: "omarchy",
         label: "Follow Omarchy",
@@ -189,6 +194,7 @@ pub fn known(id: &str) -> bool {
 
 pub fn by_id(id: &str) -> Option<Theme> {
     Some(match id {
+        "aurora" => aurora(),
         "terminal" => terminal(),
         "catppuccin-mocha" => mocha(),
         "catppuccin-macchiato" => macchiato(),
@@ -224,12 +230,8 @@ pub fn resolve(id: &str, omarchy: Option<&Theme>) -> Theme {
     by_id(id).unwrap_or_else(mocha)
 }
 
-pub fn fallback_id(omarchy_installed: bool) -> &'static str {
-    if omarchy_installed {
-        "omarchy"
-    } else {
-        "catppuccin-mocha"
-    }
+pub fn fallback_id(_omarchy_installed: bool) -> &'static str {
+    "aurora"
 }
 
 fn terminal() -> Theme {
@@ -326,7 +328,7 @@ pub fn readable(bg: Color, prefer: Color, alt: Color) -> Color {
     }
 }
 
-fn mocha() -> Theme {
+pub fn mocha() -> Theme {
     pal(
         "catppuccin-mocha",
         "Catppuccin Mocha",
@@ -606,7 +608,21 @@ mod tests {
         assert_eq!(theme.name, "Omarchy · catppuccin");
         let fallback = resolve("omarchy", None);
         assert_eq!(fallback.id, "catppuccin-mocha");
-        assert_eq!(fallback_id(false), "catppuccin-mocha");
-        assert_eq!(fallback_id(true), "omarchy");
+        assert_eq!(fallback_id(false), "aurora");
+        assert_eq!(fallback_id(true), "aurora");
     }
+}
+
+pub fn aurora() -> Theme {
+    let mut theme = pal(
+        "aurora",
+        "Aurora",
+        Kind::Dark,
+        [
+            "171820", "14151d", "222432", "3d4054", "222432", "ececf4", "a5a9be", "a5a9be",
+            "b5a0ff", "ed8796", "eac38c", "a3d6b0", "83d9dc", "b5a0ff", "b5a0ff",
+        ],
+    );
+    theme.selection_fg = theme.accent;
+    theme
 }

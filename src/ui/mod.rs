@@ -17,7 +17,14 @@ use crate::util::{human_bytes, truncate};
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
-    if area.width < 2 || area.height < 2 {
+    if area.width < 30 || area.height < 10 {
+        frame.render_widget(
+            Paragraph::new(
+                "luma · needs 30×10
+Resize terminal; Ctrl+C quits",
+            ),
+            area,
+        );
         return;
     }
     let theme = app.theme.clone();
@@ -62,6 +69,14 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     if app.help {
         draw_help(frame, &theme, area);
     }
+    app.commands.draw(
+        frame,
+        crate::app::ACTIONS,
+        app.theme.bg,
+        app.theme.fg,
+        app.theme.accent,
+        app.theme.bg_raised,
+    );
 }
 
 fn draw_status(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
@@ -78,8 +93,10 @@ fn draw_status(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     };
     let mut spans = vec![
         Span::styled(
-            " ollatui ",
-            theme.accent_style().add_modifier(Modifier::BOLD),
+            " luma ",
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
         ),
         Span::styled(format!(" {model} "), theme.status()),
     ];
@@ -134,7 +151,7 @@ fn draw_tabs(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
 
 fn draw_footer(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     let hint = match app.screen {
-        Screen::Chat => "wheel or pgup scrolls  up/down at the prompt  /help",
+        Screen::Chat => "Enter send  Alt+Enter ↵  Esc stop  ^K actions",
         Screen::Models => "j/k move  enter use  d delete  u unload  p pull",
         Screen::Marketplace => {
             "enter search, open, or pull  ^S sort  esc back   gated models need HF_TOKEN"
@@ -421,7 +438,7 @@ mod tests {
         config.theme = "dracula".into();
         let mut app = App::new(
             config,
-            std::path::PathBuf::from("/tmp/ollatui-test-config.toml"),
+            std::path::PathBuf::from("/tmp/luma-test-config.toml"),
             Vec::new(),
             None,
             String::new(),
@@ -431,9 +448,9 @@ mod tests {
         let mut terminal = Terminal::new(TestBackend::new(100, 32)).unwrap();
         terminal.draw(|f| draw(f, &mut app)).unwrap();
         let chat = buffer_text(&terminal);
-        assert!(chat.contains("ollatui"), "{chat}");
+        assert!(chat.contains("luma"), "{chat}");
         assert!(chat.contains("Chat"), "{chat}");
-        assert!(chat.contains("Chats"), "{chat}");
+        assert!(chat.contains("Conversations"), "{chat}");
 
         app.screen = Screen::Models;
         terminal.draw(|f| draw(f, &mut app)).unwrap();
@@ -462,5 +479,115 @@ mod tests {
         let offline = buffer_text(&terminal);
         assert!(offline.contains("Ollama is not running"), "{offline}");
         assert!(offline.contains("Start"), "{offline}");
+    }
+}
+
+#[cfg(test)]
+mod aurora_audit {
+    use super::*;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use ratatui::{backend::TestBackend, Terminal};
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+    fn commands() -> KeyEvent {
+        KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL)
+    }
+    fn fixture(path: std::path::PathBuf) -> App {
+        let (tx, _) = tokio::sync::mpsc::unbounded_channel();
+        let mut chat = crate::store::Conversation::new("qwen3:8b".into());
+        chat.title = "Rust notes".into();
+        chat.messages.push(crate::store::Message::user(
+            "Why does Rust say this value was moved? 你好 🦀".into(),
+        ));
+        let mut response = crate::store::Message::assistant();
+        response.content = "Rust transfers ownership when you assign a value to another variable. The original binding can no longer use it.\n\n```rust\nlet first = String::from(\"hello\");\nlet second = first;\n```\n\nBorrow with &first to read it, or clone it for a separate owned copy.".into();
+        chat.messages.push(response);
+        let mut app = App::new(
+            crate::config::Config::default(),
+            path,
+            vec![chat],
+            None,
+            String::new(),
+            None,
+            tx,
+        );
+        app.connected = Some(true);
+        app.chat_pane = crate::app::ChatPane::Composer;
+        app
+    }
+    #[test]
+    fn tab_completes_before_navigation_and_picker_owns_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = fixture(dir.path().join("config.toml"));
+        app.composer = crate::field::Field::new("/he");
+        app.on_key(key(KeyCode::Tab));
+        assert!(app.screen == Screen::Chat);
+        assert!(app.composer.value.starts_with("/help"));
+        app.model_picker = true;
+        app.on_key(key(KeyCode::Tab));
+        assert!(app.screen == Screen::Chat);
+        app.on_key(commands());
+        assert!(!app.commands.open);
+        app.model_picker = false;
+        app.composer.clear();
+        app.on_key(commands());
+        assert!(app.commands.open);
+        app.on_key(key(KeyCode::Tab));
+        assert!(app.screen == Screen::Chat);
+    }
+    #[test]
+    fn responsive_render_matrix() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = fixture(dir.path().join("config.toml"));
+        // One terminal exercises shrink/grow transitions, rather than independent initial frames.
+        let mut resizing = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        for &(w, h) in &[
+            (120, 40),
+            (60, 20),
+            (80, 24),
+            (30, 10),
+            (100, 30),
+            (120, 40),
+        ] {
+            resizing.backend_mut().resize(w, h);
+            resizing.draw(|f| draw(f, &mut app)).unwrap();
+            assert_eq!(resizing.backend().buffer().area.width, w);
+        }
+        for &(w, h) in crate::audit::SIZES {
+            let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+            term.draw(|f| draw(f, &mut app)).unwrap();
+            let buffer = term.backend().buffer();
+            if w >= 30 && h >= 10 {
+                assert!(crate::audit::text(buffer).contains("luma"));
+            }
+            crate::audit::capture("luma", "main", buffer);
+        }
+        app.chat_pane = crate::app::ChatPane::Sidebar;
+        for &(w, h) in &crate::audit::SIZES[..4] {
+            let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+            term.draw(|f| draw(f, &mut app)).unwrap();
+            crate::audit::capture("luma", "focused", term.backend().buffer());
+        }
+        app.on_key(commands());
+        for &(w, h) in &crate::audit::SIZES[..4] {
+            let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+            term.draw(|f| draw(f, &mut app)).unwrap();
+            let buffer = term.backend().buffer();
+            assert!(crate::audit::text(buffer).contains("Actions"));
+            crate::audit::capture("luma", "actions", buffer);
+        }
+        app.commands.open = false;
+        app.chats.clear();
+        app.connected = Some(false);
+        app.chat_pane = crate::app::ChatPane::Composer;
+        for tab in Screen::ALL {
+            app.screen = tab;
+            for &(w, h) in &crate::audit::SIZES[..4] {
+                let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+                term.draw(|f| draw(f, &mut app)).unwrap();
+                crate::audit::capture("luma", "offline", term.backend().buffer());
+            }
+        }
     }
 }

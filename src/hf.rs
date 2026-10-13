@@ -74,7 +74,7 @@ fn http() -> reqwest::Client {
     reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(8))
         .timeout(Duration::from_secs(20))
-        .user_agent("ollatui")
+        .user_agent("luma")
         .build()
         .unwrap_or_else(|_| reqwest::Client::new())
 }

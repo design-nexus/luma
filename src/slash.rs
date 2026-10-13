@@ -70,7 +70,7 @@ pub const COMMANDS: &[Command] = &[
     },
     Command {
         name: "quit",
-        summary: "Leave ollatui",
+        summary: "Leave luma",
         takes_arg: false,
     },
 ];

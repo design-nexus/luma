@@ -225,6 +225,7 @@ pub enum Confirm {
 }
 
 pub struct App {
+    pub commands: crate::commands::Palette,
     pub config: Config,
     config_path: PathBuf,
     pub theme: Theme,
@@ -301,6 +302,10 @@ pub struct App {
 }
 
 impl App {
+    fn apply_aurora_theme(&mut self, id: &str) {
+        self.apply_theme(id);
+    }
+
     pub fn new(
         config: Config,
         config_path: PathBuf,
@@ -315,6 +320,7 @@ impl App {
         }
         let theme = theme::resolve(&config.theme, omarchy.as_ref());
         let mut app = Self {
+            commands: crate::commands::Palette::default(),
             config,
             config_path,
             theme,
@@ -563,6 +569,11 @@ impl App {
     }
 
     pub fn on_paste(&mut self, text: &str) {
+        if self.commands.open {
+            self.commands.query.push_str(text.trim());
+            self.commands.selected = 0;
+            return;
+        }
         if self.help || self.confirm.is_some() {
             return;
         }
@@ -607,14 +618,6 @@ impl App {
             }
             return false;
         }
-        if key.code == KeyCode::Tab {
-            self.switch_screen(self.screen.next());
-            return false;
-        }
-        if key.code == KeyCode::BackTab {
-            self.switch_screen(self.screen.prev());
-            return false;
-        }
         if key.code == KeyCode::F(1) {
             self.help = !self.help;
             return false;
@@ -631,6 +634,57 @@ impl App {
             self.key_system(key);
             return false;
         }
+        if self.picking_theme {
+            self.key_theme_picker(key);
+            return false;
+        }
+        if self.editing {
+            self.key_settings(key);
+            return false;
+        }
+        if key.code == KeyCode::Tab
+            && self.screen == Screen::Chat
+            && self.chat_pane == ChatPane::Composer
+            && (self.slash_palette_open() || self.model_palette_open())
+        {
+            self.key_composer(key);
+            return false;
+        }
+        if self.commands.open
+            || (key.code == KeyCode::Char('k') && key.modifiers.contains(KeyModifiers::CONTROL))
+        {
+            if let Some(action) = self.commands.handle(key, ACTIONS) {
+                if action.modifiers == KeyModifiers::ALT {
+                    let id = match action.key {
+                        KeyCode::Char('o') => "omarchy",
+                        KeyCode::Char('t') => "terminal",
+                        _ => "aurora",
+                    };
+                    self.apply_aurora_theme(id);
+                } else {
+                    match action.key {
+                        KeyCode::Char('1') => self.switch_screen(Screen::Chat),
+                        KeyCode::Char('2') => self.switch_screen(Screen::Models),
+                        KeyCode::Char('3') => self.switch_screen(Screen::Marketplace),
+                        KeyCode::Char('4') => self.switch_screen(Screen::Settings),
+                        KeyCode::Char('n') => self.new_chat(),
+                        _ => {
+                            return self.on_key(action.event());
+                        }
+                    }
+                }
+            }
+            return false;
+        }
+        if key.code == KeyCode::Tab {
+            self.switch_screen(self.screen.next());
+            return false;
+        }
+        if key.code == KeyCode::BackTab {
+            self.switch_screen(self.screen.prev());
+            return false;
+        }
+
         if matches!(key.code, KeyCode::Char('q')) && !self.typing() && key.modifiers.is_empty() {
             self.shutdown();
             return true;
@@ -2508,3 +2562,19 @@ fn ctrl(key: &KeyEvent, c: char) -> bool {
     matches!(key.code, KeyCode::Char(ch) if ch == c)
         && key.modifiers.contains(KeyModifiers::CONTROL)
 }
+
+pub const ACTIONS: &[crate::commands::Action] = &[
+    crate::commands::Action::key("Chat screen", '1'),
+    crate::commands::Action::key("Models screen", '2'),
+    crate::commands::Action::key("Marketplace screen", '3'),
+    crate::commands::Action::key("Settings screen", '4'),
+    crate::commands::Action::ctrl("New conversation", 'n'),
+    crate::commands::Action {
+        label: "Help",
+        key: KeyCode::F(1),
+        modifiers: KeyModifiers::NONE,
+    },
+    crate::commands::Action::theme("Aurora theme", 'a'),
+    crate::commands::Action::theme("Follow Omarchy theme", 'o'),
+    crate::commands::Action::theme("Terminal theme", 't'),
+];

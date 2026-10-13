@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Build ollatui and install the binary.
+# Build luma and install the binary.
 # From a clone:  ./install.sh
-# From the web:  curl -fsSL https://raw.githubusercontent.com/design-nexus/ollatui/main/install.sh | bash
+# From the web:  curl -fsSL https://raw.githubusercontent.com/design-nexus/luma/main/install.sh | bash
 # Optional:      ./install.sh --prefix "$HOME/.local"
 
 set -euo pipefail
 
 PREFIX="${HOME}/.local"
-REPO="https://github.com/design-nexus/ollatui.git"
+REPO="https://github.com/design-nexus/luma.git"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -21,7 +21,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     -h|--help)
       echo "Usage: install.sh [--prefix DIR]"
-      echo "Installs the ollatui binary into DIR/bin. Default DIR is ~/.local."
+      echo "Installs the luma binary into DIR/bin. Default DIR is ~/.local."
       exit 0
       ;;
     *)
@@ -47,29 +47,29 @@ source_dir=""
 script_path="${BASH_SOURCE[0]:-}"
 if [[ -n "$script_path" && -f "$script_path" ]]; then
   candidate="$(cd "$(dirname "$script_path")" && pwd)"
-  if [[ -f "$candidate/Cargo.toml" ]] && grep -q 'name = "ollatui"' "$candidate/Cargo.toml"; then
+  if [[ -f "$candidate/Cargo.toml" ]] && grep -q 'name = "luma"' "$candidate/Cargo.toml"; then
     source_dir="$candidate"
   fi
 fi
 
 if [[ -z "$source_dir" ]]; then
   if ! command -v git >/dev/null 2>&1; then
-    echo "git was not found, and this script is not inside an ollatui checkout." >&2
+    echo "git was not found, and this script is not inside an luma checkout." >&2
     exit 1
   fi
   CLONE_DIR="$(mktemp -d)"
   echo "Cloning $REPO"
-  git clone --depth 1 "$REPO" "$CLONE_DIR/ollatui"
-  source_dir="$CLONE_DIR/ollatui"
+  git clone --depth 1 "$REPO" "$CLONE_DIR/luma"
+  source_dir="$CLONE_DIR/luma"
 fi
 
 echo "Building release binary"
-cargo build --release --manifest-path "$source_dir/Cargo.toml"
+cargo build --release --locked --manifest-path "$source_dir/Cargo.toml"
 
 install -d "$PREFIX/bin"
-install -m 755 "$source_dir/target/release/ollatui" "$PREFIX/bin/ollatui"
+install -m 755 "$source_dir/target/release/luma" "$PREFIX/bin/luma"
 
-echo "Installed $PREFIX/bin/ollatui"
+echo "Installed $PREFIX/bin/luma"
 case ":$PATH:" in
   *":$PREFIX/bin:"*) ;;
   *)
@@ -77,4 +77,4 @@ case ":$PATH:" in
     echo "  export PATH=\"$PREFIX/bin:\$PATH\""
     ;;
 esac
-echo "Run: ollatui"
+echo "Run: luma"

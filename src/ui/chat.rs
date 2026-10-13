@@ -17,21 +17,27 @@ pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
         return;
     }
     let theme = app.theme.clone();
-    let text_rows = composer_rows(&app.composer.value, area.width.saturating_sub(2) as usize);
-    let composer_h = (text_rows as u16 + 2)
-        .min(area.height.saturating_sub(1))
-        .max(3);
-    let [top, composer_area] =
-        Layout::vertical([Constraint::Min(1), Constraint::Length(composer_h)]).areas(area);
-    let transcript = if app.show_chats {
-        let side_w = if top.width > 64 { 26 } else { 16 };
-        let [side, transcript] =
-            Layout::horizontal([Constraint::Length(side_w), Constraint::Min(1)]).areas(top);
+    let content = if app.show_chats && (area.width >= 80 || app.chat_pane == ChatPane::Sidebar) {
+        if area.width < 70 && app.chat_pane == ChatPane::Sidebar {
+            draw_sidebar(frame, app, &theme, area);
+            return;
+        }
+        let [side, content] =
+            Layout::horizontal([Constraint::Length(24), Constraint::Min(1)]).areas(area);
         draw_sidebar(frame, app, &theme, side);
-        transcript
+        content
     } else {
-        top
+        area
     };
+    let text_rows = composer_rows(
+        &app.composer.value,
+        content.width.saturating_sub(2) as usize,
+    );
+    let composer_h = (text_rows as u16 + 2)
+        .min(content.height.saturating_sub(1))
+        .max(3);
+    let [transcript, composer_area] =
+        Layout::vertical([Constraint::Min(1), Constraint::Length(composer_h)]).areas(content);
     draw_transcript(frame, app, &theme, transcript);
     draw_composer(frame, app, &theme, composer_area);
     if app.model_palette_open() {
@@ -43,7 +49,7 @@ pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
 
 fn draw_sidebar(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     let focused = app.chat_pane == ChatPane::Sidebar;
-    let block = panel("Chats", focused, theme);
+    let block = panel("Conversations", focused, theme);
     let items: Vec<ListItem> = app
         .chats
         .iter()
@@ -173,12 +179,12 @@ fn message_lines(
     }
     let mut lines = Vec::new();
     let name = assistant_name.trim();
-    let name = if name.is_empty() { "assistant" } else { name };
+    let name = if name.is_empty() { "Luma" } else { name };
     let marker = if selected { "▌ " } else { "  " };
     lines.push(Line::from(Span::styled(
-        format!("{marker}{name}"),
+        format!("{marker}{name} · local response"),
         Style::default()
-            .fg(theme.green)
+            .fg(theme.accent)
             .add_modifier(Modifier::BOLD),
     )));
 
@@ -278,10 +284,10 @@ fn user_message_lines(
     let bg = lift(theme.bg);
     let text_style = Style::default().fg(theme.fg).bg(bg);
     let prompt_style = Style::default()
-        .fg(theme.green)
+        .fg(theme.cyan)
         .bg(bg)
         .add_modifier(Modifier::BOLD);
-    let prompt = "❯ ";
+    let prompt = "You › ";
     let prompt_cols = crate::util::width_of(prompt).max(1);
     let text_cols = width.saturating_sub(prompt_cols).max(1);
     let mut lines = Vec::new();
@@ -493,7 +499,7 @@ fn draw_composer(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         if app.streaming {
             "Generating"
         } else {
-            "Prompt"
+            "Message"
         },
         focused,
         theme,
